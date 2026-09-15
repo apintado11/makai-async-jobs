@@ -20,25 +20,27 @@ stateDiagram-v2
 
 - Terminal states do not leave that state.
 - `running → queued` is a retry. `attempt` goes up. Backoff is a scheduled Service Bus message, not a timer in the worker.
-- Updates are `UPDATE jobs SET status = $next WHERE id = $id AND status = $expected`. Zero rows: someone else won; reload and stop.
-- `cancel_requested_at` is a flag. Status becomes `cancelled` only when the API (still queued) or the worker applies the transition.
+- Updates are `findOneAndUpdate({ _id, status: expected }, { $set: { status: next } })`. Null result: someone else won; reload and stop.
+- `cancelRequestedAt` is a flag. Status becomes `cancelled` only when the API (still queued) or the worker applies the transition.
 
 ## Data model
 
 ```text
 jobs
-  id, tenant_id, type, status
-  attempt, max_attempts
-  idempotency_key          -- unique per tenant when present
-  payload_uri, result_uri
-  last_error
-  webhook_url
-  cancel_requested_at
-  created_at, updated_at, started_at, finished_at
+  _id, tenantId, type, status
+  attempt, maxAttempts
+  idempotencyKey           -- unique per tenant when present
+  payloadUri, resultUri
+  lastError
+  webhookUrl
+  cancelRequestedAt
+  createdAt, updatedAt, startedAt, finishedAt
 
 outbox
-  id, job_id, payload, available_at, attempts, delivered_at
+  _id, jobId, payload, availableAt, attempts, deliveredAt
 ```
+
+Indexes: `{ tenantId, status }`, `{ status, updatedAt }` for the sweeper, unique `{ tenantId, idempotencyKey }` when the key is set.
 
 Service Bus message: `{ "jobId", "type", "attempt" }`. MessageId is `jobId:attempt` so a double send of the same attempt is dropped.
 
@@ -47,10 +49,10 @@ Service Bus message: `{ "jobId", "type", "attempt" }`. MessageId is `jobId:attem
 | Method | Path | Contract |
 | --- | --- | --- |
 | `POST` | `/jobs` | `{ type, payload, webhookUrl?, idempotencyKey? }` → `202 { jobId, status: "queued" }`. Same idempotency key returns the original job. Over cap → `429`. |
-| `GET` | `/jobs/:id` | Current row. This is status. Poll it. |
-| `POST` | `/jobs/:id/cancel` | Sets `cancel_requested_at`. `202` if `queued` or `running`. `409` if already terminal. |
+| `GET` | `/jobs/:id` | Current document. This is status. Poll it. |
+| `POST` | `/jobs/:id/cancel` | Sets `cancelRequestedAt`. `202` if `queued` or `running`. `409` if already terminal. |
 
-Submit: insert `queued`, then send the message, then return. If the send fails, the sweeper re-enqueues `queued` rows older than ~15s.
+Submit: insert `queued`, then send the message, then return. If the send fails, the sweeper re-enqueues `queued` jobs older than ~15s.
 
 ## Sequences
 
@@ -60,7 +62,7 @@ Submit and run:
 sequenceDiagram
   participant C as Client
   participant API as NestJS_API
-  participant DB as PostgreSQL
+  participant DB as MongoDB
   participant SB as ServiceBus
   participant W as Worker
 
@@ -83,11 +85,11 @@ Cancel:
 sequenceDiagram
   participant C as Client
   participant API as NestJS_API
-  participant DB as PostgreSQL
+  participant DB as MongoDB
   participant W as Worker
 
   C->>API: POST /jobs/id/cancel
-  API->>DB: set cancel_requested_at
+  API->>DB: set cancelRequestedAt
   API-->>C: 202
   alt queued
     W->>DB: see flag, CAS to cancelled, complete message
@@ -100,13 +102,13 @@ sequenceDiagram
 
 Only the worker that holds the peek-lock can complete the message. Completing after cancel matters; abandoning would redeliver a cancelled job. On lock renewal, re-read the flag.
 
-Notify: worker writes terminal status and outbox in one transaction. Dispatcher claims the outbox row and POSTs a signed webhook. Failures retry the webhook only.
+Notify: worker writes terminal status and outbox in one transaction. Dispatcher claims the outbox document and POSTs a signed webhook. Failures retry the webhook only.
 
 ## Scaling and fairness
 
 - KEDA on active message count, with a max replica cap.
 - Per-pod cap on in-flight handlers.
-- Tenant open-job count from Postgres (`queued` + `running`). Over quota → `429`.
+- Tenant open-job count from MongoDB (`queued` + `running`). Over quota → `429`.
 - Global queue-depth watermark → `429` for everyone.
 
 ## NestJS shape
@@ -115,7 +117,7 @@ One repo, two processes:
 
 - `JobsModule` — HTTP submit / status / cancel.
 - `WorkerModule` — Service Bus receiver, handler registry, lock renewal, cancel checks.
-- `JobsRepository` — conditional updates + outbox in one transaction.
+- `JobsRepository` — `findOneAndUpdate` plus outbox in one transaction.
 - `NotificationModule` — outbox poller, webhook client.
 
 ```ts
@@ -124,7 +126,7 @@ interface JobContext {
   tenantId: string;
   attempt: number;
   payload: unknown;
-  isCancelled(): Promise<boolean>;  // SELECT cancel_requested_at
+  isCancelled(): Promise<boolean>;  // findById, read cancelRequestedAt
 }
 ```
 
@@ -132,8 +134,8 @@ interface JobContext {
 
 | Failure | What happens |
 | --- | --- |
-| API dies after insert, before enqueue | Sweeper re-enqueues `queued` rows. |
-| Worker dies mid-handler | Lock expires, message comes back. Conditional update stops a double start; a stale `running` row is returned to `queued` after a lease timeout. |
+| API dies after insert, before enqueue | Sweeper re-enqueues `queued` jobs. |
+| Worker dies mid-handler | Lock expires, message comes back. Conditional update stops a double start; a stale `running` document is returned to `queued` after a lease timeout. |
 | Service Bus down | Submit fails after insert; sweeper retries. `GET /jobs/:id` still works. |
 | Webhook down | Outbox retries. Job stays terminal. |
 | Poison payload | Max delivery → DLQ; job `failed`. |
@@ -141,5 +143,5 @@ interface JobContext {
 ## Why this shape
 
 - Running the job inside the HTTP request cannot last minutes and cannot absorb a spike.
-- Using only Postgres as the queue (`SKIP LOCKED`) works at small scale. Service Bus is there for spikes, DLQ, and scheduled retry.
+- Using only MongoDB as the queue (a work collection you poll) works at small scale. Service Bus is there for spikes, DLQ, and scheduled retry.
 - A cache or a workflow engine is a later add when status traffic or multi-step human waits actually show up.
