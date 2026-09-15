@@ -4,6 +4,7 @@ Thumbs.db
 .env.*
 !.env.example
 node_modules/
+pdf/node_modules/
 dist/
 coverage/
 *.log

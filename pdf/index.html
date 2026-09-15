@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Async Job Processing Architecture — Alex Pintado</title>
+  <style>
+    :root {
+      --ink: #1c2430;
+      --muted: #5c6770;
+      --teal: #0c3d47;
+      --teal-mid: #1a6a76;
+      --accent: #2a8a96;
+      --line: #cdd6da;
+      --wash: #eef5f6;
+      --paper: #fbfaf7;
+      --white: #fff;
+      --rule: #e6ebe9;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--white);
+      color: var(--ink);
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.45;
+    }
+
+    @page {
+      size: letter;
+      margin: 0.72in 0.7in 0.78in;
+    }
+
+    .mast {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      border-bottom: 3px solid var(--teal);
+      padding-bottom: 14px;
+      margin-bottom: 22px;
+    }
+
+    .wordmark {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--teal);
+      letter-spacing: -0.03em;
+      line-height: 1;
+    }
+
+    .mast-meta {
+      text-align: right;
+      color: var(--muted);
+      font-size: 8.5pt;
+      line-height: 1.4;
+    }
+
+    h1 {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 22pt;
+      font-weight: 700;
+      color: var(--teal);
+      letter-spacing: -0.02em;
+      margin: 18px 0 8px;
+      line-height: 1.15;
+    }
+
+    .lede {
+      font-size: 11.5pt;
+      color: var(--ink);
+      max-width: 42em;
+      margin: 0 0 16px;
+    }
+
+    .pills {
+      display: flex;
+      gap: 8px;
+      margin: 0 0 22px;
+    }
+
+    .pill {
+      background: var(--wash);
+      color: var(--teal);
+      border: 1px solid #c5dce0;
+      border-radius: 999px;
+      padding: 4px 12px;
+      font-size: 8.5pt;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    h2 {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 13.5pt;
+      color: var(--teal);
+      margin: 20px 0 8px;
+      padding-top: 4px;
+      border-top: 1px solid var(--rule);
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+
+    h2:first-of-type { border-top: 0; padding-top: 0; }
+
+    h3 {
+      font-size: 10.5pt;
+      color: var(--teal-mid);
+      margin: 14px 0 6px;
+      font-weight: 700;
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+
+    p { margin: 0 0 9px; }
+
+    ul, ol { margin: 0 0 10px; padding-left: 1.15em; }
+    li { margin-bottom: 4px; }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px 28px;
+    }
+
+    .figure {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px 12px 10px;
+      margin: 8px 0 14px;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .figure svg { display: block; width: 100%; height: auto; }
+
+    .caption {
+      font-size: 8pt;
+      color: var(--muted);
+      text-align: center;
+      margin: 8px 0 0;
+      letter-spacing: 0.01em;
+    }
+
+    .steps {
+      list-style: none;
+      padding: 0;
+      margin: 8px 0 12px;
+      counter-reset: step;
+    }
+
+    .steps li {
+      counter-increment: step;
+      display: flex;
+      gap: 10px;
+      margin-bottom: 7px;
+      align-items: flex-start;
+    }
+
+    .steps li::before {
+      content: counter(step);
+      flex: 0 0 22px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--teal);
+      color: var(--white);
+      font-size: 8.5pt;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+    }
+
+    .steps li > span { flex: 1; min-width: 0; }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 8px 0 12px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--accent);
+      border-radius: 6px;
+      padding: 10px 12px 8px;
+      background: var(--white);
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .card h3 { margin: 0 0 4px; font-size: 10pt; }
+    .card p { margin: 0; font-size: 9.5pt; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9pt;
+      margin: 6px 0 12px;
+    }
+
+    th {
+      text-align: left;
+      background: var(--teal);
+      color: var(--white);
+      font-weight: 600;
+      padding: 6px 8px;
+    }
+
+    td {
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--rule);
+      vertical-align: top;
+    }
+
+    tr:nth-child(even) td { background: var(--wash); }
+
+    code, .mono {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 8.5pt;
+    }
+
+    pre {
+      background: #f3f6f6;
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--teal-mid);
+      border-radius: 4px;
+      padding: 10px 12px;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 8pt;
+      line-height: 1.4;
+      overflow: hidden;
+      margin: 6px 0 12px;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .callout {
+      background: var(--wash);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin: 8px 0 12px;
+      font-size: 10pt;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .keep {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+  </style>
+</head>
+<body>
+  <header class="mast">
+    <div class="wordmark">makai</div>
+    <div class="mast-meta">
+      Alex Pintado<br />
+      Async Technical Exercise<br />
+      15 September 2026
+    </div>
+  </header>
+
+  <h1>Async job processing architecture</h1>
+  <p class="lede">
+    A product team needs to accept long-running jobs over an API, run them in the background,
+    retry failures, expose status, notify on completion or failure, and cancel work that is
+    already running — including under high, spiky load. This is the system I would build.
+  </p>
+  <div class="pills">
+    <span class="pill">NestJS</span>
+    <span class="pill">Azure Service Bus</span>
+    <span class="pill">MongoDB</span>
+  </div>
+
+  <h2>Assumptions</h2>
+  <div class="two-col">
+    <ul>
+      <li>Multi-tenant SaaS. The caller is already authenticated; every job belongs to a tenant.</li>
+      <li>A job is a machine-run unit of work: a type plus a payload. Large payloads live in blob storage; the queue message is only <code>jobId</code>.</li>
+      <li>Delivery is at-least-once. Workers are idempotent. Exactly-once is not assumed.</li>
+    </ul>
+    <ul>
+      <li>Cancel is cooperative. The worker checks a field on the job document. We do not kill the process or yank a locked Service Bus message.</li>
+      <li>Notification is an HTTPS webhook supplied at submit time.</li>
+      <li>Azure: AKS, Service Bus, MongoDB via Cosmos DB’s Mongo API.</li>
+    </ul>
+  </div>
+
+  <h2>High-level architecture</h2>
+  <p>
+    Three moving parts. The API never runs the job. It writes a document, puts a message on the bus,
+    and returns <code>202</code>. Workers compete for those messages. MongoDB is the record of what happened:
+    status, attempts, cancel, and the webhook outbox.
+  </p>
+
+  <figure class="figure">
+    <svg viewBox="0 0 860 248" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="System flow from client through API, Service Bus, workers, MongoDB, and webhook">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#1a6a76" />
+        </marker>
+      </defs>
+
+      <rect x="16" y="20" width="128" height="56" rx="8" fill="#0c3d47" />
+      <text x="80" y="44" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700">Client</text>
+      <text x="80" y="62" text-anchor="middle" fill="#c5e4e8" font-family="Segoe UI, Arial, sans-serif" font-size="10">submit · status · cancel</text>
+
+      <rect x="196" y="20" width="140" height="56" rx="8" fill="#14606c" />
+      <text x="266" y="44" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700">NestJS API</text>
+      <text x="266" y="62" text-anchor="middle" fill="#d5eef1" font-family="Segoe UI, Arial, sans-serif" font-size="10">write, then enqueue</text>
+
+      <rect x="388" y="20" width="168" height="56" rx="8" fill="#1a6a76" />
+      <text x="472" y="44" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700">Azure Service Bus</text>
+      <text x="472" y="62" text-anchor="middle" fill="#d5eef1" font-family="Segoe UI, Arial, sans-serif" font-size="10">spike buffer · peek-lock</text>
+
+      <rect x="608" y="20" width="148" height="56" rx="8" fill="#14606c" />
+      <text x="682" y="44" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700">NestJS workers</text>
+      <text x="682" y="62" text-anchor="middle" fill="#d5eef1" font-family="Segoe UI, Arial, sans-serif" font-size="10">run · retry · cancel check</text>
+
+      <line x1="144" y1="48" x2="194" y2="48" stroke="#1a6a76" stroke-width="1.8" marker-end="url(#arrow)" />
+      <line x1="336" y1="48" x2="386" y2="48" stroke="#1a6a76" stroke-width="1.8" marker-end="url(#arrow)" />
+      <line x1="556" y1="48" x2="606" y2="48" stroke="#1a6a76" stroke-width="1.8" marker-end="url(#arrow)" />
+
+      <rect x="196" y="164" width="360" height="60" rx="10" fill="#eef5f6" stroke="#1a6a76" stroke-width="1.6" />
+      <text x="376" y="190" text-anchor="middle" fill="#0c3d47" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700">MongoDB</text>
+      <text x="376" y="208" text-anchor="middle" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif" font-size="11">jobs · status · cancel · attempts · outbox</text>
+
+      <rect x="620" y="170" width="148" height="48" rx="8" fill="#2a8a96" />
+      <text x="694" y="190" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700">Webhook</text>
+      <text x="694" y="206" text-anchor="middle" fill="#e7f6f8" font-family="Segoe UI, Arial, sans-serif" font-size="10">outbox dispatcher</text>
+
+      <path d="M266 76 V 120 H 376 V 162" fill="none" stroke="#1a6a76" stroke-width="1.6" marker-end="url(#arrow)" />
+      <text x="318" y="114" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif" font-size="10">insert queued</text>
+
+      <path d="M682 76 V 120 H 430 V 162" fill="none" stroke="#1a6a76" stroke-width="1.6" marker-end="url(#arrow)" />
+      <text x="520" y="114" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif" font-size="10">CAS status</text>
+
+      <line x1="556" y1="194" x2="618" y2="194" stroke="#1a6a76" stroke-width="1.6" marker-end="url(#arrow)" />
+    </svg>
+    <p class="caption">Figure 1. Request path and work path. The API records intent; workers do the work; MongoDB is the source of truth.</p>
+  </figure>
+
+  <div class="keep">
+    <h3>Happy path</h3>
+    <ol class="steps">
+      <li><span><code>POST /jobs</code> validates the request, inserts a <code>queued</code> document, enqueues <code>jobId</code> on Service Bus, and returns <code>202</code>.</span></li>
+      <li><span>A worker peek-locks the message, conditionally sets the document to <code>running</code>, and executes the handler.</span></li>
+      <li><span>On success it sets <code>succeeded</code> and inserts an outbox document in the same transaction, then completes the message. A dispatcher POSTs the webhook.</span></li>
+    </ol>
+    <p>
+      Spikes sit on Service Bus. Workers scale on queue depth (KEDA). If the queue or a tenant is over a cap, submit returns <code>429</code> instead of taking unbounded work.
+    </p>
+  </div>
+
+  <h2>Major components</h2>
+  <div class="card-grid">
+    <div class="card">
+      <h3>Job API · NestJS</h3>
+      <p>Public surface: submit, get status, cancel. Auth, validation, tenant checks. Write the document first, then enqueue. If enqueue fails, a sweeper re-enqueues leftover <code>queued</code> jobs so nothing is stranded.</p>
+    </div>
+    <div class="card">
+      <h3>MongoDB</h3>
+      <p>One document in <code>jobs</code> is the source of truth. Status moves as <code>queued → running → succeeded | failed | cancelled</code>. Updates use <code>findOneAndUpdate</code> with <code>status: expected</code> so two workers cannot start the same job. The <code>outbox</code> collection is written in the same transaction as a terminal status.</p>
+    </div>
+    <div class="card">
+      <h3>Azure Service Bus</h3>
+      <p>The spike buffer. Peek-lock, max delivery count, dead-letter queue, duplicate detection, scheduled messages for backoff. One queue to start. The message body is small: <code>jobId</code>, <code>type</code>, <code>attempt</code>.</p>
+    </div>
+    <div class="card">
+      <h3>Workers · NestJS, second process</h3>
+      <p>Same codebase as the API. Pull from the bus. Skip the job if it is already terminal or cancel was requested. Run the handler. Complete the message when done. Check <code>cancelRequestedAt</code> between steps and on lock renewal.</p>
+    </div>
+  </div>
+  <p>
+    <strong>Webhook dispatcher.</strong> Reads the outbox, POSTs a signed payload, retries. The job is already terminal; a down webhook does not re-run work. Clients can always <code>GET /jobs/:id</code>.
+  </p>
+
+  <div class="keep">
+    <h2>Job lifecycle</h2>
+  <p>
+    Status is a state machine, not a free-form string. Terminal states never leave that state.
+    <code>running → queued</code> is a retry: <code>attempt</code> increments, and backoff is a scheduled Service Bus message, not a timer inside the worker.
+    <code>cancelRequestedAt</code> is a flag. Status becomes <code>cancelled</code> only when the API (still queued) or the worker applies the transition.
+  </p>
+
+  <figure class="figure">
+    <svg viewBox="0 0 860 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Job status state machine">
+      <defs>
+        <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#1a6a76" />
+        </marker>
+      </defs>
+
+      <rect x="40" y="96" width="130" height="52" rx="8" fill="#0c3d47" />
+      <text x="105" y="127" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700">queued</text>
+
+      <rect x="280" y="96" width="140" height="52" rx="8" fill="#14606c" />
+      <text x="350" y="127" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="14" font-weight="700">running</text>
+
+      <rect x="530" y="18" width="140" height="48" rx="8" fill="#2a8a96" />
+      <text x="600" y="47" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700">succeeded</text>
+
+      <rect x="530" y="98" width="140" height="48" rx="8" fill="#5c6770" />
+      <text x="600" y="127" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700">failed</text>
+
+      <rect x="530" y="178" width="140" height="48" rx="8" fill="#8a4a4a" />
+      <text x="600" y="207" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700">cancelled</text>
+
+      <line x1="170" y1="122" x2="278" y2="122" stroke="#1a6a76" stroke-width="1.8" marker-end="url(#arrow2)" />
+      <text x="224" y="112" text-anchor="middle" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif" font-size="10">lock + CAS</text>
+
+      <line x1="420" y1="110" x2="528" y2="42" stroke="#1a6a76" stroke-width="1.8" marker-end="url(#arrow2)" />
+      <line x1="420" y1="122" x2="528" y2="122" stroke="#1a6a76" stroke-width="1.8" marker-end="url(#arrow2)" />
+      <line x1="350" y1="148" x2="350" y2="202" stroke="#1a6a76" stroke-width="1.6" />
+      <line x1="350" y1="202" x2="528" y2="202" stroke="#1a6a76" stroke-width="1.8" marker-end="url(#arrow2)" />
+
+      <path d="M280 148 C 220 148, 220 202, 170 202" fill="none" stroke="#1a6a76" stroke-width="1.6" marker-end="url(#arrow2)" />
+      <text x="188" y="188" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif" font-size="10">retry</text>
+
+      <line x1="105" y1="148" x2="105" y2="202" stroke="#1a6a76" stroke-width="1.6" />
+      <line x1="105" y1="202" x2="528" y2="202" stroke="#1a6a76" stroke-width="1.6" />
+      <text x="160" y="216" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif" font-size="10">cancel before start</text>
+      <text x="430" y="192" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif" font-size="10">cancel observed</text>
+      <text x="455" y="78" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif" font-size="10">handler ok</text>
+      <text x="455" y="138" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif" font-size="10">permanent / max</text>
+    </svg>
+    <p class="caption">Figure 2. Job status. Conditional updates (<code>findOneAndUpdate</code> with expected status) make each arrow single-winner.</p>
+  </figure>
+
+  <div class="callout">
+    The actual update is <code>findOneAndUpdate({ _id, status: expected }, { $set: { status: next } })</code>.
+    A null result means another actor won. The worker reloads and stops — usually by completing the Service Bus message so it is not retried.
+  </div>
+  </div>
+
+  <h2>API</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:18%">Method</th>
+        <th style="width:22%">Path</th>
+        <th>Contract</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>POST</code></td>
+        <td><code>/jobs</code></td>
+        <td><code>{ type, payload, webhookUrl?, idempotencyKey? }</code> → <code>202 { jobId, status: "queued" }</code>. Same idempotency key returns the original job. Over cap → <code>429</code>.</td>
+      </tr>
+      <tr>
+        <td><code>GET</code></td>
+        <td><code>/jobs/:id</code></td>
+        <td>Current document. This is status. Clients poll it. Near real time for a single job does not require a second store.</td>
+      </tr>
+      <tr>
+        <td><code>POST</code></td>
+        <td><code>/jobs/:id/cancel</code></td>
+        <td>Sets <code>cancelRequestedAt</code>. <code>202</code> if queued or running. <code>409</code> if already terminal, so the client does not believe cancel took effect.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>
+    Submit order: insert <code>queued</code>, send the message, return. If the send fails, a sweeper re-enqueues <code>queued</code> jobs older than about 15 seconds. The document is never deleted on enqueue failure.
+  </p>
+
+  <div class="keep">
+    <h2>Data model</h2>
+    <div class="two-col">
+      <pre>jobs
+  _id, tenantId, type, status
+  attempt, maxAttempts
+  idempotencyKey   // unique per tenant
+  payloadUri, resultUri
+  lastError
+  webhookUrl
+  cancelRequestedAt
+  createdAt, updatedAt
+  startedAt, finishedAt</pre>
+      <pre>outbox
+  _id, jobId, payload
+  availableAt, attempts
+  deliveredAt
+
+Service Bus message
+  { jobId, type, attempt }
+  MessageId = jobId:attempt</pre>
+    </div>
+    <p>
+      Indexes: <code>{ tenantId, status }</code>, <code>{ status, updatedAt }</code> for the sweeper, unique <code>{ tenantId, idempotencyKey }</code> when a key is present.
+      Duplicate detection on Service Bus drops a double send of the same attempt.
+    </p>
+  </div>
+
+  <h2>Flows that matter</h2>
+
+  <h3>Submit and run</h3>
+  <figure class="figure">
+    <svg viewBox="0 0 860 318" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sequence for submit and run">
+      <defs>
+        <marker id="arrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#1a6a76" />
+        </marker>
+      </defs>
+      <!-- lifelines -->
+      <text x="70" y="22" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#0c3d47">Client</text>
+      <text x="230" y="22" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#0c3d47">API</text>
+      <text x="390" y="22" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#0c3d47">MongoDB</text>
+      <text x="550" y="22" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#0c3d47">Service Bus</text>
+      <text x="730" y="22" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700" fill="#0c3d47">Worker</text>
+      <line x1="70" y1="32" x2="70" y2="308" stroke="#cdd6da" stroke-width="1" />
+      <line x1="230" y1="32" x2="230" y2="308" stroke="#cdd6da" stroke-width="1" />
+      <line x1="390" y1="32" x2="390" y2="308" stroke="#cdd6da" stroke-width="1" />
+      <line x1="550" y1="32" x2="550" y2="308" stroke="#cdd6da" stroke-width="1" />
+      <line x1="730" y1="32" x2="730" y2="308" stroke="#cdd6da" stroke-width="1" />
+
+      <line x1="70" y1="56" x2="230" y2="56" stroke="#1a6a76" stroke-width="1.5" marker-end="url(#arrow3)" />
+      <text x="150" y="50" text-anchor="middle" font-size="10" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif">POST /jobs</text>
+
+      <line x1="230" y1="84" x2="390" y2="84" stroke="#1a6a76" stroke-width="1.5" marker-end="url(#arrow3)" />
+      <text x="310" y="78" text-anchor="middle" font-size="10" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif">insert queued</text>
+
+      <line x1="230" y1="112" x2="550" y2="112" stroke="#1a6a76" stroke-width="1.5" marker-end="url(#arrow3)" />
+      <text x="470" y="106" text-anchor="middle" font-size="10" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif">send jobId</text>
+
+      <line x1="230" y1="140" x2="70" y2="140" stroke="#1a6a76" stroke-width="1.5" marker-end="url(#arrow3)" stroke-dasharray="4 3" />
+      <text x="150" y="134" text-anchor="middle" font-size="10" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif">202 jobId</text>
+
+      <line x1="550" y1="176" x2="730" y2="176" stroke="#1a6a76" stroke-width="1.5" marker-end="url(#arrow3)" />
+      <text x="640" y="170" text-anchor="middle" font-size="10" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif">peek-lock</text>
+
+      <line x1="730" y1="208" x2="390" y2="208" stroke="#1a6a76" stroke-width="1.5" marker-end="url(#arrow3)" />
+      <text x="560" y="202" text-anchor="middle" font-size="10" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif">CAS queued → running</text>
+
+      <line x1="730" y1="244" x2="390" y2="244" stroke="#1a6a76" stroke-width="1.5" marker-end="url(#arrow3)" />
+      <text x="560" y="238" text-anchor="middle" font-size="10" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif">CAS succeeded + outbox</text>
+
+      <line x1="730" y1="280" x2="550" y2="280" stroke="#1a6a76" stroke-width="1.5" marker-end="url(#arrow3)" />
+      <text x="640" y="274" text-anchor="middle" font-size="10" fill="#5c6770" font-family="Segoe UI, Arial, sans-serif">complete</text>
+    </svg>
+    <p class="caption">Figure 3. Submit returns before work starts. The worker is the only actor that moves the job to running.</p>
+  </figure>
+
+  <h3>Retry</h3>
+  <p>
+    Retryable errors (timeouts, 503): CAS <code>running → queued</code>, increment <code>attempt</code>, schedule the next Service Bus message with exponential backoff plus jitter
+    (<code>min(2^attempt, 300)</code> seconds), complete the current message so it does not redeliver immediately.
+    Permanent errors or <code>attempt &gt;= maxAttempts</code>: CAS to <code>failed</code> plus outbox.
+    Business-validation failures are <code>failed</code> with structured <code>lastError</code>. The dead-letter queue is for poison messages and operator replay, not expected business errors.
+  </p>
+
+  <h3>Cancel</h3>
+  <figure class="figure">
+    <svg viewBox="0 0 860 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cancel flow">
+      <defs>
+        <marker id="arrow4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#1a6a76" />
+        </marker>
+      </defs>
+      <rect x="20" y="70" width="150" height="54" rx="8" fill="#0c3d47" />
+      <text x="95" y="93" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700">POST cancel</text>
+      <text x="95" y="110" text-anchor="middle" fill="#c5e4e8" font-family="Segoe UI, Arial, sans-serif" font-size="10">set cancelRequestedAt</text>
+
+      <rect x="230" y="70" width="130" height="54" rx="8" fill="#14606c" />
+      <text x="295" y="102" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700">Where is it?</text>
+
+      <rect x="430" y="12" width="160" height="48" rx="8" fill="#1a6a76" />
+      <text x="510" y="32" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="11" font-weight="700">queued</text>
+      <text x="510" y="48" text-anchor="middle" fill="#d5eef1" font-family="Segoe UI, Arial, sans-serif" font-size="9">worker skips handler</text>
+
+      <rect x="430" y="74" width="160" height="48" rx="8" fill="#1a6a76" />
+      <text x="510" y="94" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="11" font-weight="700">running</text>
+      <text x="510" y="110" text-anchor="middle" fill="#d5eef1" font-family="Segoe UI, Arial, sans-serif" font-size="9">check between steps</text>
+
+      <rect x="430" y="136" width="160" height="48" rx="8" fill="#5c6770" />
+      <text x="510" y="156" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="11" font-weight="700">already terminal</text>
+      <text x="510" y="172" text-anchor="middle" fill="#ececec" font-family="Segoe UI, Arial, sans-serif" font-size="9">HTTP 409</text>
+
+      <rect x="660" y="44" width="170" height="54" rx="8" fill="#8a4a4a" />
+      <text x="745" y="67" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="12" font-weight="700">cancelled</text>
+      <text x="745" y="84" text-anchor="middle" fill="#f3d9d9" font-family="Segoe UI, Arial, sans-serif" font-size="10">complete the message</text>
+
+      <line x1="170" y1="97" x2="228" y2="97" stroke="#1a6a76" stroke-width="1.6" marker-end="url(#arrow4)" />
+      <line x1="360" y1="80" x2="428" y2="36" stroke="#1a6a76" stroke-width="1.5" marker-end="url(#arrow4)" />
+      <line x1="360" y1="97" x2="428" y2="97" stroke="#1a6a76" stroke-width="1.5" marker-end="url(#arrow4)" />
+      <line x1="360" y1="110" x2="428" y2="160" stroke="#1a6a76" stroke-width="1.5" marker-end="url(#arrow4)" />
+      <line x1="590" y1="36" x2="658" y2="62" stroke="#1a6a76" stroke-width="1.5" marker-end="url(#arrow4)" />
+      <line x1="590" y1="98" x2="658" y2="78" stroke="#1a6a76" stroke-width="1.5" marker-end="url(#arrow4)" />
+    </svg>
+    <p class="caption">Figure 4. Cancel is a flag on the document. Service Bus cannot pull a locked message back; only the locking worker completes it.</p>
+  </figure>
+  <p>
+    Completing after cancel is required. Abandoning would redeliver a cancelled job. On lock renewal, re-read the flag.
+    Honest constraint: a job may finish the current step after cancel is requested. That is the contract.
+  </p>
+
+  <div class="keep">
+    <h3>Notify</h3>
+    <p>
+      The worker writes terminal status and the outbox document in one MongoDB transaction. A dispatcher claims the outbox row and POSTs a signed webhook.
+      Failures retry the webhook only — never the job. Extra caches are not required for v1; status is <code>GET /jobs/:id</code>.
+    </p>
+  </div>
+
+  <h2>The hard problems</h2>
+
+  <div class="keep">
+    <h3>1. Cancel while the worker already holds the lock</h3>
+    <p>
+      Service Bus cannot take a locked message back. Killing the pod is worse: the lock expires, the message comes back, and you may run cancelled work.
+      Cancel writes <code>cancelRequestedAt</code>. If the job is still queued, the worker sees the flag, marks <code>cancelled</code>, completes the message, and does not run.
+      If it is running, the handler checks the flag between steps and does the same. If it is already done, return <code>409</code>.
+    </p>
+  </div>
+
+  <div class="keep">
+    <h3>2. Spikes and noisy-neighbor tenants</h3>
+    <p>The bus is a buffer, not an infinite one.</p>
+    <ol>
+      <li>Scale workers on queue depth, with a max replica count so we do not melt MongoDB or downstream APIs.</li>
+      <li>Reject submit with <code>429</code> + <code>Retry-After</code> when global depth or that tenant’s open jobs (<code>queued</code> + <code>running</code>) exceed a cap.</li>
+      <li>Cap in-flight jobs per worker pod so one slow handler type cannot pin a replica.</li>
+    </ol>
+  </div>
+
+  <div class="keep">
+    <h3>3. Retries without double-applying, and status that is actually queryable</h3>
+    <p>
+      The same job can run twice (lock timeout, duplicate enqueue). Idempotent handlers, not hope, are the fix.
+      Conditional status updates plus Service Bus duplicate detection (<code>MessageId = jobId:attempt</code>) stop two workers from both starting the same attempt.
+      Status is a MongoDB read. For a single job that is enough. If status traffic later dwarfs writes, add a cache then — not on day one.
+    </p>
+  </div>
+
+  <h2>Failure modes</h2>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:34%">Failure</th>
+        <th>What happens</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>API dies after insert, before enqueue</td>
+        <td>Sweeper re-enqueues leftover <code>queued</code> jobs.</td>
+      </tr>
+      <tr>
+        <td>Worker dies mid-handler</td>
+        <td>Peek-lock expires, message comes back. Conditional update stops a double start. A stale <code>running</code> document is returned to <code>queued</code> after a lease timeout on <code>startedAt</code>.</td>
+      </tr>
+      <tr>
+        <td>Service Bus down</td>
+        <td>Submit fails after insert; sweeper retries. <code>GET /jobs/:id</code> still works.</td>
+      </tr>
+      <tr>
+        <td>Webhook endpoint down</td>
+        <td>Outbox retries. Job stays terminal. The client can still read status.</td>
+      </tr>
+      <tr>
+        <td>Poison payload</td>
+        <td>Max delivery count → dead-letter queue; job <code>failed</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="keep">
+    <h2>How I would structure the NestJS code</h2>
+    <p>One repo, two processes, shared modules:</p>
+    <ul>
+      <li><code>JobsModule</code> — HTTP submit, status, cancel.</li>
+      <li><code>WorkerModule</code> — Service Bus receiver, handler registry, lock renewal, cancel checks.</li>
+      <li><code>JobsRepository</code> — <code>findOneAndUpdate</code> plus outbox in one transaction.</li>
+      <li><code>NotificationModule</code> — outbox poller, webhook client.</li>
+    </ul>
+<pre>interface JobContext {
+  jobId: string;
+  tenantId: string;
+  attempt: number;
+  payload: unknown;
+  isCancelled(): Promise&lt;boolean&gt;;  // read cancelRequestedAt
+}</pre>
+    <p>
+      <code>isCancelled()</code> is the cooperative interrupt. A handler that ignores it cannot be cancelled mid-execution; that is documented, not papered over.
+    </p>
+  </div>
+
+  <h2>What I would not do yet</h2>
+  <ul>
+    <li><strong>Run the job inside the HTTP request.</strong> It cannot last minutes and cannot absorb a spike.</li>
+    <li><strong>Use MongoDB as the queue</strong> (a work collection you poll). Fine at small scale. Service Bus is there for spikes, DLQ, and scheduled retry.</li>
+    <li><strong>Redis, Kafka, a second queue, or a workflow engine.</strong> This prompt is submit / run / retry / status / cancel. A queue plus a job collection covers it. Add a cache when status reads are actually hot. Add a workflow engine if jobs later wait on humans for hours.</li>
+  </ul>
+  <p>
+    Build the job collection and the queue first. Everything else is a scaling add-on you can name when asked, not something you have to operate in v1.
+  </p>
+</body>
+</html>
